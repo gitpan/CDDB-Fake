@@ -1,6 +1,5 @@
 Revision history for Perl extension CDDB::Fake.
 
 0.01  Sat Jul 26 15:58:02 2003
-	- original version; created by h2xs 1.22 with options
-		-X -n CDDB::Fake
+	- original version
 

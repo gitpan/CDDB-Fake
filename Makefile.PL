@@ -1,5 +1,6 @@
 use 5.005;
 use ExtUtils::MakeMaker;
+use Config;
 
 my @scripts = qw(ls2nocddb);
 my $usrbin = "/usr/bin";

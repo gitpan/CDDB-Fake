@@ -1,10 +1,10 @@
 # CDDB::Fake.pm -- CDDB File Faker
-# RCS Info        : $Id: CDDB-Fake.pm,v 1.2 2003/07/26 15:52:26 jv Exp $
+# RCS Info        : $Id: CDDB-Fake.pm,v 1.4 2003/09/08 20:37:44 jv Exp $
 # Author          : Johan Vromans
 # Created On      : Tue Mar 25 22:38:32 2003
 # Last Modified By: Johan Vromans
-# Last Modified On: Sat Jul 26 17:58:24 2003
-# Update Count    : 37
+# Last Modified On: Mon Sep  8 22:31:33 2003
+# Update Count    : 95
 # Status          : Unknown, Use with caution!
 
 =head1 NAME
@@ -45,8 +45,8 @@ For example, you can cut the results of a search at Gracenote
       ...
       12. Nuages
 
-The titles may be optionally followed by trailing TABs and a MM:SS
-time indicator.
+The titles may be optionally followed by trailing TABs (not spaces)
+and a MM:SS time indicator.
 
 A tool is included to generate a fake file from the names of the files
 in the directory.
@@ -57,7 +57,7 @@ B<WARNING:> CDDB::Fake implements only a part of the CDDB::File API.
 
 package CDDB::Fake;
 
-$VERSION = "1.00";
+$VERSION = "1.01";
 
 use strict;
 use warnings;
@@ -85,27 +85,86 @@ sub new {
 	$fh = $file;
     }
     else {
-	open($fh, $file) or Carp::croak("$file: $!\n");
+	open($fh, $file) or croak("$file: $!\n");
     }
+    my $off = 150;
+    my $state = 0;
+    my $va = 0;
     while ( <$fh> ) {
 	next unless /\S/;
 	s/[\r\n]+$//;
-	if ( /^\s+(\d+)\.?\s+(.*)/ ) {
-	    push(@{$self->{_tracks}}, CDDB::Fake::Track->new(0+$1, $2));
+
+	# State 0: Looking for artist/title.
+	if ( $state == 0 ) {
+	    if ( /^\s*(.+)\s+\/\s+(.*)/ ) {
+		$self->{_artist} = _deblank($1);
+		$self->{_title} = _deblank($2);
+	    }
+	    else {
+		# Eponymous.
+		$self->{_artist} = $self->{_title}  = _deblank($_);
+	    }
+	    $va = lc($self->{_artist}) eq "various";
+	    $state++;
 	    next;
 	}
-	if ( /^\s*(.+)\s+\/\s+(.*)/ && !$self->{_artist} ) {
-	    $self->{_artist} = $1;
-	    $self->{_title} = $2;
+
+	# State 1: Processing tracks.
+	if ( $state == 1 ) {
+	    if ( /^\s*(\d+)\.?\s+(.*)/ ) {
+		my ($tn, $tt, $tl) = (0+$1, $2);
+		if ( $tt =~ /^(.*?)\t+ ?(\d+):(\d\d)\s*$/ ) {
+		    $tt = _deblank($1);
+		    $tl = 60 * $2 + $3;
+		    $self->{_length} += $tl;
+		}
+		else {
+		    $tt = _deblank($tt);
+		}
+		my $art = $self->{_artist};
+		if ( $va ) {
+		    if ( $tt =~ /^(.+?):\s+(.*)/ ) {
+			$art = _deblank($1);
+			$tt  = _deblank($2);
+		    }
+		    elsif ( $tt =~ /^(.+?)\s+\/\s+(.*)/ ) {
+			$art = _deblank($1);
+			$tt  = _deblank($2);
+		    }
+		}
+		push(@{$self->{_tracks}},
+		     CDDB::Fake::Track->new($art, $tn, $tt,
+					    $tl, $off));
+		$off += 75 * $tl if $tl;
+		next;
+	    }
+	    else {
+		$state++;
+	    }
+	}
+
+	# State 2: Remainder (ext info).
+	if ( $state == 2 ) {
+	    $self->{_extd} = $_ . "\n";
+	    $state++;
 	    next;
 	}
-	if ( $self->{_artist} && $self->{_tracks} ) {
-	    $self->{_extd} = join("\n", $_, <$fh>);
-	    last;
-	}
+
+	# State 3: Rest of ext info.
+	$self->{_extd} .= $_ . "\n";
     }
 
     bless $self, $pkg;
+}
+
+sub _deblank {
+    my $t = shift;
+    for ( $t ) {
+	s/^\s+//;
+	s/\s+$//;
+	s/\s+/ /g;
+	return $_;
+    }
 }
 
 =item artist
@@ -143,45 +202,62 @@ sub track_count {
 
 =item tracks
 
-In list context: returns a list of track objects.
-In scalar context: returns a reference to this list.
+Returns a list of track objects.
 
 =cut
 
 sub tracks {
     my ($self) = @_;
-    wantarray ? @{$self->{_tracks}} : $self->{_tracks};
+    @{$self->{_tracks}};
 }
 
 =item id
+
+=item all_ids
 
 Returns the (fake) id for this disc.
 
 =cut
 
-sub id {
-    "00000000";
-}
+sub id { "00000000" }
+
+sub all_ids { ("00000000") }
 
 =item year
 
 =item genre
 
-=item length
+=item submitted_by
 
-These methods return undef since the information is not available in
-CDDB::Fake files.
+=item processed_by
+
+These methods return empty strings since the information is not
+available in CDDB::Fake files.
 
 =cut
 
-sub year   { undef }
-sub genre  { undef }
-sub length { undef }
+sub year         { "" }
+sub genre        { "" }
+sub submitted_by { "" }
+sub processed_by { "" }
+sub revision     { 1  }
+
+=item length
+
+This method will return the accumulated length of all the tracks,
+provided this information is present in the fake file.
+
+=cut
+
+sub length {
+    my ($self) = @_;
+    $self->{_length} || 0;
+}
 
 =item extd
 
 Returns the extended disc information, that is everything that follows
-the list of tracks n the fake file.
+the list of tracks in the fake file.
 
 =cut
 
@@ -197,12 +273,8 @@ sub extd  {
 package CDDB::Fake::Track;
 
 sub new {
-    my ($pkg, $num, $tt, $len) = @_;
-    if ( $tt =~ /^(.*?)\t+ ?(\d+):(\d\d)\s*$/ ) {
-	$tt = $1;
-	$len = 60 * $2 + $3;
-    }
-    bless [ $num, $tt, $len ], $pkg;
+    my ($pkg, $disc, $num, $tt, $len, $off) = @_;
+    bless [ $disc, $num, $tt, $len, $off ], $pkg;
 }
 
 =pod
@@ -211,13 +283,21 @@ Track objects provide the following methods:
 
 =over 4
 
-=item number
+=item artist
 
-The track number.
+The artist, usually the same as the artist of the disc.
 
 =cut
 
-sub number { shift->[0] }
+sub artist { shift->[0] }
+
+=item number
+
+The track number, starting with 1.
+
+=cut
+
+sub number { shift->[1] }
 
 =item title
 
@@ -225,15 +305,37 @@ The track title.
 
 =cut
 
-sub title  { shift->[1] }
+sub title  { shift->[2] }
 
 =item length
 
 The track length (in seconds).
 
+This will be zero unless a track length was specified in the fake info.
+
 =cut
 
-sub length { shift->[2] }
+sub length { shift->[3] }
+
+=item offset
+
+The track offset.
+
+This will be bogus unless track offsets could be estimated using the
+length information.
+
+=cut
+
+sub offset { shift->[4] }
+
+=item extd
+
+This method returns an empty string since the information is not
+available in CDDB::Fake files.
+
+=cut
+
+sub extd { "" }
 
 =head1 EXAMPLES
 
@@ -248,7 +350,7 @@ It is often handy to generalize the handling of real and fake files:
 
     sub cddb_info($) {
 	my $df = shift;
-	Carp::croak("cddb_info(dir)\n") unless -d $df;
+	croak("cddb_info(dir)\n") unless -d $df;
 	return CDDB::File->new("$df/.cddb")   if -s "$df/.cddb";
 	return CDDB::Fake->new("$df/.nocddb") if -s "$df/.nocddb";
 	undef;
