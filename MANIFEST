@@ -1,0 +1,7 @@
+Changes
+lib/CDDB/Fake.pm
+script/ls2nocddb
+Makefile.PL
+MANIFEST
+README
+t/1.t
