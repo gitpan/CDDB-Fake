@@ -1,4 +1,4 @@
-CDDB/Fake version 1.01
+CDDB/Fake version 2.00
 ======================
 
 Sometimes there's no CDDB file available for a piece of music. For
@@ -47,7 +47,7 @@ This module requires these other modules and libraries:
 
 COPYRIGHT AND LICENCE
 
-  This programs is Copyright 2003, Squirrel Consultancy.
+  This programs is Copyright 2003,2004 Squirrel Consultancy.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the Perl Artistic License or the GNU General

@@ -1,10 +1,10 @@
 # CDDB::Fake.pm -- CDDB File Faker
-# RCS Info        : $Id: CDDB-Fake.pm,v 1.4 2003/09/08 20:37:44 jv Exp $
+# RCS Info        : $Id: CDDB-Fake.pm,v 1.5 2004/08/13 13:38:04 jv Exp $
 # Author          : Johan Vromans
 # Created On      : Tue Mar 25 22:38:32 2003
 # Last Modified By: Johan Vromans
-# Last Modified On: Mon Sep  8 22:31:33 2003
-# Update Count    : 95
+# Last Modified On: Fri Aug 13 15:28:55 2004
+# Update Count    : 139
 # Status          : Unknown, Use with caution!
 
 =head1 NAME
@@ -45,8 +45,31 @@ For example, you can cut the results of a search at Gracenote
       ...
       12. Nuages
 
-The titles may be optionally followed by trailing TABs (not spaces)
-and a MM:SS time indicator.
+The track titles may be optionally followed by trailing TABs (not
+spaces) and a MM:SS time indicator (which may have a leading space if
+it's M:SS).
+
+Extra track information can be passed on lines that follow the track
+title. These lines must start with whitespace, and may not begin with
+a number. Anything that follows the list of tracks is considered extra disc information. For example:
+
+    Birelli Lagrene / Standards
+
+       1. C'est Si Bon
+          Original version
+       2. Softly, As in a Morning Sunrise
+          Live recording.
+          Probably incomplete.
+       3. Days of Wine and Roses
+      ...
+      12. Nuages
+
+    This album was recorded in the Olympia Studios in Paris.
+
+Multiple lines of additional info are concatenated with newlines
+inbetween. However, if one of the lines contains C<\n> (that's
+backslash-n), all lines are conctenated using a single whitespace, and
+the C<\n>'s are turned into real newlines.
 
 A tool is included to generate a fake file from the names of the files
 in the directory.
@@ -57,7 +80,7 @@ B<WARNING:> CDDB::Fake implements only a part of the CDDB::File API.
 
 package CDDB::Fake;
 
-$VERSION = "1.01";
+$VERSION = "2.00";
 
 use strict;
 use warnings;
@@ -77,7 +100,11 @@ CDDB::Fake object is then created from the file data.
 sub new {
     my ($pkg, $file) = @_;
 
-    my $self = {};
+    my $self = {
+		_title => "",
+		_artist => "",
+		_extd => "",
+	       };
 
     my $fh;
     if ( ref($file) ) {
@@ -90,6 +117,7 @@ sub new {
     my $off = 150;
     my $state = 0;
     my $va = 0;
+    my $to;
     while ( <$fh> ) {
 	next unless /\S/;
 	s/[\r\n]+$//;
@@ -112,7 +140,9 @@ sub new {
 	# State 1: Processing tracks.
 	if ( $state == 1 ) {
 	    if ( /^\s*(\d+)\.?\s+(.*)/ ) {
-		my ($tn, $tt, $tl) = (0+$1, $2);
+		my $tn = 0 + $1;
+		my $tt = $2;
+		my $tl;
 		if ( $tt =~ /^(.*?)\t+ ?(\d+):(\d\d)\s*$/ ) {
 		    $tt = _deblank($1);
 		    $tl = 60 * $2 + $3;
@@ -133,9 +163,13 @@ sub new {
 		    }
 		}
 		push(@{$self->{_tracks}},
-		     CDDB::Fake::Track->new($art, $tn, $tt,
-					    $tl, $off));
+		     $to = CDDB::Fake::Track->new($art, $tn, $tt,
+						  $tl, $off, ""));
 		$off += 75 * $tl if $tl;
+		next;
+	    }
+	    elsif ( defined($to) && /^\s+(.+)/ ) {
+		$to->_extd_append($1);
 		next;
 	    }
 	    else {
@@ -152,7 +186,10 @@ sub new {
 
 	# State 3: Rest of ext info.
 	$self->{_extd} .= $_ . "\n";
+
     }
+
+    $self->{_extd} = _newlines($self->{_extd});
 
     bless $self, $pkg;
 }
@@ -163,6 +200,16 @@ sub _deblank {
 	s/^\s+//;
 	s/\s+$//;
 	s/\s+/ /g;
+	return $_;
+    }
+}
+
+sub _newlines {
+    my $t = shift;
+    for ( $t ) {
+	return $_ unless /\\n/;
+	s/\s\n\s/ /g;
+	s/\\n/\n/g;
 	return $_;
     }
 }
@@ -263,7 +310,67 @@ the list of tracks in the fake file.
 
 sub extd  {
     my ($self) = @_;
-    $self->{_extd};
+    $self->{_extd} || "";
+}
+
+=item as_cddb
+
+Returns the data in the format of a CDDB entry.
+
+=cut
+
+sub as_cddb {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    # Writing CDDB data requires some line breaking and such.
+    my $out = sub {
+	my ($tag, $desc) = @_;
+	$desc =~ s/\n/\\n/g;
+	$desc =~ s/\\n$//;
+	$tag .= "=";
+	$desc = $tag . $desc;
+	for ( ;; ) {
+	    my $t = substr($desc,0,70,$tag);
+	    $ret .= $t . "\n";
+	    last if $desc eq $tag;
+	}
+    };
+
+    my @tracks = $self->tracks;
+
+    # Header.
+    $ret = "# xmcd 2.0 CD database file\n" .
+      "# Copyright (C) 1996,2004 Johan Vromans\n" .
+	"#\n";
+
+    if ( $self->length ) {
+	$ret .= "# Track frame offsets:\n";
+	foreach ( @tracks ) {
+	    $ret .= "#\t" . $_->offset . "\n";
+	}
+	$ret .= "#\n" .
+	  "# Disc length: " . $self->length . " seconds\n" .
+	    "#\n";
+    }
+
+    $out->("DISCID", $self->id);
+    $out->("DTITLE", $self->artist . " / " . $self->title);
+
+    my $i;
+    for ( $i=0; $i < @tracks; $i++ ) {
+	$out->("TTITLE$i", $tracks[$i]->title)
+	  if defined $tracks[$i];
+    }
+
+    $out->("EXTD", $self->extd);
+
+    for ( $i=0; $i < @tracks; $i++ ) {
+	$out->("EXTT$i", $tracks[$i]->extd);
+    }
+    $out->("PLAYORDER", "");
+    $ret;
 }
 
 =back
@@ -273,8 +380,8 @@ sub extd  {
 package CDDB::Fake::Track;
 
 sub new {
-    my ($pkg, $disc, $num, $tt, $len, $off) = @_;
-    bless [ $disc, $num, $tt, $len, $off ], $pkg;
+    my ($pkg, $disc, $num, $tt, $len, $off, $extd) = @_;
+    bless [ $disc, $num, $tt, $len, $off, $extd ], $pkg;
 }
 
 =pod
@@ -289,7 +396,7 @@ The artist, usually the same as the artist of the disc.
 
 =cut
 
-sub artist { shift->[0] }
+sub artist { shift->[0] || ""}
 
 =item number
 
@@ -297,7 +404,7 @@ The track number, starting with 1.
 
 =cut
 
-sub number { shift->[1] }
+sub number { shift->[1] || 0 }
 
 =item title
 
@@ -305,7 +412,7 @@ The track title.
 
 =cut
 
-sub title  { shift->[2] }
+sub title  { shift->[2] || ""}
 
 =item length
 
@@ -315,7 +422,7 @@ This will be zero unless a track length was specified in the fake info.
 
 =cut
 
-sub length { shift->[3] }
+sub length { shift->[3] || 0}
 
 =item offset
 
@@ -326,16 +433,27 @@ length information.
 
 =cut
 
-sub offset { shift->[4] }
+sub offset { shift->[4] || 0 }
 
 =item extd
 
-This method returns an empty string since the information is not
-available in CDDB::Fake files.
+This extended track info, if present.
 
 =cut
 
-sub extd { "" }
+sub extd {
+    CDDB::Fake::_newlines(shift->[5] || "");
+}
+
+sub _extd_append {
+    my ($self, $text) = @_;
+    if ( defined($self->[5]) && CORE::length($self->[5]) > 0 ) {
+	$self->[5] .= " " . $text;
+    }
+    else {
+	$self->[5] = $text;
+    }
+}
 
 =head1 EXAMPLES
 
@@ -366,7 +484,7 @@ Johan Vromans <jvromans@squirrel.nl>
 
 =head1 COPYRIGHT
 
-This programs is Copyright 2003, Squirrel Consultancy.
+This programs is Copyright 2003,2004, Squirrel Consultancy.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the Perl Artistic License or the GNU General

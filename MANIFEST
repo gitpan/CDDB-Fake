@@ -4,6 +4,9 @@ script/ls2nocddb
 Makefile.PL
 MANIFEST
 README
-t/1.t
-t/2.t
+CHANGES
+t/basic1.t
+t/basic2.t
+t/cddb1.t
+t/cddb2.t
 META.yml                                Module meta-data (added by MakeMaker)

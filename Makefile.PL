@@ -1,3 +1,4 @@
+use strict;
 use 5.005;
 use ExtUtils::MakeMaker;
 use Config;
@@ -23,8 +24,10 @@ if ( $@ ) {
 
 NOTICE: The ls2nocddb program that comes with this package can provide
 playing time for MP3 files if you install the package
-MP3::Audio::Frame from CPAN.
+MP3::Info (preferred) or MPEG::Audio::Frame (version 1.08 or later)
+from CPAN.
 
+URL: http://search.cpan.org/search?query=MP3::Info&mode=dist
 URL: http://search.cpan.org/search?query=MP3::Audio::Frame&mode=dist
 
 EOD
